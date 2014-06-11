@@ -70,38 +70,35 @@ object Test {
 
     PropertyConfigurator.configure("log4j.config")
 
-    obs_data.index.slice(0,10).foreach( gene_name => {
-      val gene = pred_data.labelJoin(obs_data, "TP53")
-      val numIterations = 200
-      val lin = new LogisticRegressionWithSGD()
-      lin.optimizer.setNumIterations(numIterations).setRegParam(0.8).setUpdater(new L1Updater)
-      val model = lin.run(gene.rdd.map(_._2))
-      //gene.rdd.saveAsTextFile("gene.vec")
-      //val model = LogisticRegressionWithSGD.train(gene.rdd.map(_._2), numIterations)
+    obs_data.index.slice(0,1000).foreach( gene_name => {
+      if (pred_data.index.contains(gene_name)) {
+        val gene = pred_data.labelJoin(obs_data, gene_name)
+        val numIterations = 200
+        val lin = new LogisticRegressionWithSGD()
+        lin.optimizer.setNumIterations(numIterations).setRegParam(0.8).setUpdater(new L1Updater)
+        val model = lin.run(gene.rdd.map(_._2))
+        // Evaluate model on training examples and compute training error
+        val scoreAndLabel = gene.rdd.map { x =>
+          val prediction = model.predict(x._2.features)
+          (prediction, x._2.label)
+        }
 
-      // Evaluate model on training examples and compute training error
+        val w = Map(obs_data.index.zip(model.weights.toArray):_*)
+        //val MSE = scoreAndLabel.map{case(v, p) => math.pow((v - p), 2)}.mean()
+        //println("training Mean Squared Error = " + MSE)
+        val metrics = new BinaryClassificationMetrics(scoreAndLabel)
+        val auROC = metrics.areaUnderROC()
+        println(metrics.pr().collect.mkString(" "))
+        println("Area under ROC = " + auROC)
 
-      val scoreAndLabel = gene.rdd.map { x =>
-        val prediction = model.predict(x._2.features)
-        (prediction, x._2.label)
+        val obj = Map(("gene", gene_name), ("auROC", auROC), ("weights", new JSONObject(w)), ("intercept", model.intercept), ("metrics", metrics.pr().collect.mkString(" ")))
+
+        val f = new java.io.FileWriter("weights/" + gene_name + ".weights.vec")
+        f.write(new JSONObject(obj).toString())
+        f.close()
       }
-
-      val w = Map(obs_data.index.zip(model.weights.toArray):_*)
-      //val MSE = scoreAndLabel.map{case(v, p) => math.pow((v - p), 2)}.mean()
-      //println("training Mean Squared Error = " + MSE)
-      val metrics = new BinaryClassificationMetrics(scoreAndLabel)
-      val auROC = metrics.areaUnderROC()
-      println(metrics.pr().collect.mkString(" "))
-      println("Area under ROC = " + auROC)
-
-      val obj = Map(("auROC", auROC), ("weights", new JSONObject(w)), ("intercept", model.intercept), ("metrics", metrics.pr().collect.mkString(" ")))
-
-      val f = new java.io.FileWriter("weights/" + gene_name + ".weights.vec")
-      f.write(new JSONObject(obj).toString())
-      f.close()
     })
     sc.stop()
-
   }
 
 }
