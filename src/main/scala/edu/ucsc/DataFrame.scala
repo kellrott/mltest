@@ -70,18 +70,24 @@ class DataFrame(val sc : SparkContext, val index : IndexedSeq[String], val rdd:R
     return new DataFrame(sc, index, rdd.map( x => (x._1, ml_linalg.Vectors.dense(x._2.toArray.map(f))) ) )
   }
 
-  def corr() : DataFrame = {
-    rdd.cartesian(rdd).map( x => {
-
-      val y = br_linalg.DenseVector(x._1._2)
-      val z = br_linalg.DenseVector(x._2._2)
-
-      MathUtils.corr(y,z)
-
-
+  def pdist(method:String) : DataFrame = {
+    return method match {
+      case "corr"  => pdist( (x,y) => MathUtils.corr(x,y))
+      case "euclidean" => pdist( (x,y) => MathUtils.euclidean(x,y))
+      case _ => throw new Exception("Bad distance method")
     }
-    )
-    null
+  }
+
+  def pdist( method : (br_linalg.Vector[Double], br_linalg.Vector[Double]) => Double) : DataFrame = {
+    val n = rdd.cartesian(rdd).map( x => {
+      val y = br_linalg.DenseVector(x._1._2.toArray)
+      val z = br_linalg.DenseVector(x._2._2.toArray)
+      val o = method(y,z)
+      (x._1._1, Map((x._2._1, o)))
+    }).reduceByKey( (x,y) => {
+      x ++ y
+    } )
+    return DataFrame.create(n)
   }
 
 }
