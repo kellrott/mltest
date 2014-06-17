@@ -17,8 +17,12 @@ object Scan {
 
     val cor_df = df.pdist("euclidean")
 
+
     println(cor_df.index)
     println(cor_df.rdd.first())
+
+    cor_df.write_csv(args(0) + ".matrix")
+
     //data.foreach( x => println(x.keys.mkString(",")))
   }
 }

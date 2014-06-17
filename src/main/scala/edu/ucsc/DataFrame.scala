@@ -1,7 +1,7 @@
 package edu.ucsc.mltest
 
 import breeze.io.CSVReader
-import java.io.{File, FileReader}
+import java.io.{FileWriter, File, FileReader}
 import org.apache.spark.mllib.{linalg => ml_linalg}
 import breeze.{linalg => br_linalg}
 import org.apache.spark.mllib.regression.LabeledPoint
@@ -88,6 +88,20 @@ class DataFrame(val sc : SparkContext, val index : IndexedSeq[String], val rdd:R
       x ++ y
     } )
     return DataFrame.create(n)
+  }
+
+
+  def write_csv(path:String, seperator : Char = ',') = {
+    val out = new FileWriter(path)
+    val header = Array("") ++ index
+    out.write( header.mkString(seperator.toString) )
+    out.write("\n")
+    rdd.toLocalIterator.foreach(  x => {
+      out.write(x._1)
+      out.write(seperator.toString)
+      out.write(x._2.toArray.mkString(seperator.toString))
+      out.write("\n")
+    })
   }
 
 }
