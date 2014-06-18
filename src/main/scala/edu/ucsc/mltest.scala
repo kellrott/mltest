@@ -22,6 +22,10 @@ import org.apache.spark.mllib.classification.LogisticRegressionWithSGD
 import org.apache.spark.mllib.evaluation.BinaryClassificationMetrics
 import scala.util.parsing.json.JSONObject
 
+import org.apache.log4j.Logger
+import org.apache.log4j.Level
+
+
 class Segmenter[T] (in: Iterator[T], blockSize:Int) extends Iterator[Seq[T]] {
 
   var block : Seq[T] = null
@@ -61,16 +65,17 @@ class BinaryConfusionMatrix(val tp:Long, val tn:Long, val fp:Long, val fn : Long
 }
 
 
-object Test {
+object FullRegression {
 
   def main(args:Array[String]) = {
     val sc = new SparkContext(args(0), "MLTest")
     val obs_data = DataFrame.load_csv(sc, args(1), separator = '\t')(x => math.log(x+1) + 0.01)
     val pred_data = DataFrame.load_csv(sc, args(2), separator = '\t')
 
-    PropertyConfigurator.configure("log4j.config")
+    //PropertyConfigurator.configure("log4j.config")
+    Logger.getLogger("org.apache").setLevel(Level.WARN)
 
-    obs_data.index.slice(0,1000).foreach( gene_name => {
+    obs_data.index.foreach( gene_name => {
       if (pred_data.index.contains(gene_name)) {
         val gene = pred_data.labelJoin(obs_data, gene_name)
         val numIterations = 200
