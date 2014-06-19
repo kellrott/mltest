@@ -75,7 +75,7 @@ object FullRegression {
     //PropertyConfigurator.configure("log4j.config")
     Logger.getLogger("org.apache").setLevel(Level.WARN)
 
-    obs_data.index.foreach( gene_name => {
+    obs_data.index.toParArray.map( gene_name => {
       if (pred_data.index.contains(gene_name)) {
         val gene = pred_data.labelJoin(obs_data, gene_name)
         val numIterations = 200
