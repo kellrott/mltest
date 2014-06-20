@@ -2,7 +2,7 @@
 package edu.ucsc.mltest
 
 
-import org.apache.spark.SparkContext
+import org.apache.spark.{SparkConf, SparkContext}
 import org.apache.spark.SparkContext._
 import org.apache.log4j.PropertyConfigurator
 
@@ -13,6 +13,7 @@ import org.apache.spark.mllib.linalg
 import breeze.io.CSVReader
 import java.io.{File, FileReader}
 import org.apache.spark.storage.StorageLevel
+import org.rogach.scallop
 import scala.collection.mutable.ArrayBuffer
 import org.apache.spark.rdd._
 
@@ -20,6 +21,7 @@ import org.apache.spark.mllib.util.MLUtils
 import org.apache.spark.mllib.optimization.{SquaredL2Updater, L1Updater}
 import org.apache.spark.mllib.classification.LogisticRegressionWithSGD
 import org.apache.spark.mllib.evaluation.BinaryClassificationMetrics
+import scala.collection.parallel.ForkJoinTaskSupport
 import scala.util.parsing.json.JSONObject
 
 import org.apache.log4j.Logger
@@ -68,14 +70,41 @@ class BinaryConfusionMatrix(val tp:Long, val tn:Long, val fp:Long, val fn : Long
 object FullRegression {
 
   def main(args:Array[String]) = {
-    val sc = new SparkContext(args(0), "MLTest")
-    val obs_data = DataFrame.load_csv(sc, args(1), separator = '\t')(x => math.log(x+1) + 0.01)
-    val pred_data = DataFrame.load_csv(sc, args(2), separator = '\t')
+
+    object cmdline extends scallop.ScallopConf(args) {
+      val master : scallop.ScallopOption[String] = opt[String]("master", default = Some("local"))
+      val cores : scallop.ScallopOption[String] = opt[String]("cores", default = Some("32"))
+      val workdir : scallop.ScallopOption[String] = opt[String]("workdir", default = Some("/tmp"))
+      val outdir : scallop.ScallopOption[String] = opt[String]("outdir", default = Some("weights"))
+      val tasks : scallop.ScallopOption[Int] = opt[Int]("tasks", default = Some(10))
+
+      val obsFile: scallop.ScallopOption[String] = trailArg[String](required = true)
+      val featureFile: scallop.ScallopOption[String] = trailArg[String](required = true)
+    }
+
+    println(cmdline)
+
+    val conf = new SparkConf()
+      .setMaster(cmdline.master())
+      .setAppName("MLTest")
+      .set("spark.executor.memory", "8g")
+      .set("spark.mesos.coarse", "true")
+      .set("spark.cores.max", cmdline.cores())
+      .set("spark.local.dir", cmdline.workdir())
+      .set("spark.scheduler.mode", "FAIR")
+
+
+    val sc = new SparkContext(conf)
+    val obs_data = DataFrame.load_csv(sc, cmdline.obsFile(), separator = '\t')(x => math.log(x+1) + 0.01)
+    val pred_data = DataFrame.load_csv(sc, cmdline.featureFile(), separator = '\t')
 
     //PropertyConfigurator.configure("log4j.config")
     Logger.getLogger("org.apache").setLevel(Level.WARN)
 
-    obs_data.index.toParArray.map( gene_name => {
+    val name_array = obs_data.index.toParArray
+    name_array.tasksupport = new ForkJoinTaskSupport(new scala.concurrent.forkjoin.ForkJoinPool(cmdline.tasks()))
+
+    name_array.map( gene_name => {
       if (pred_data.index.contains(gene_name)) {
         val gene = pred_data.labelJoin(obs_data, gene_name)
         val numIterations = 200
@@ -98,7 +127,7 @@ object FullRegression {
 
         val obj = Map(("gene", gene_name), ("auROC", auROC), ("weights", new JSONObject(w)), ("intercept", model.intercept), ("metrics", metrics.pr().collect.mkString(" ")))
 
-        val f = new java.io.FileWriter("weights/" + gene_name + ".weights.vec")
+        val f = new java.io.FileWriter(new File(cmdline.outdir(), gene_name + ".weights.vec"))
         f.write(new JSONObject(obj).toString())
         f.close()
       }
