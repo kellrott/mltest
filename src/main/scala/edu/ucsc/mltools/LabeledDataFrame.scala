@@ -1,4 +1,4 @@
-package edu.ucsc.mltest
+package edu.ucsc.mltools
 
 import org.apache.spark.mllib.regression.LabeledPoint
 import org.apache.spark.rdd.RDD

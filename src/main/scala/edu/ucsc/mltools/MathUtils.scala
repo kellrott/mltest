@@ -1,9 +1,6 @@
-package edu.ucsc.mltest
+package edu.ucsc.mltools
 
-import breeze.{linalg => br_linalg, stats}
-import breeze.stats.DescriptiveStats._
-import breeze.linalg.support._
-import breeze.stats.meanAndVariance
+import breeze.{linalg => br_linalg}
 
 object MathUtils {
 
@@ -23,7 +20,9 @@ object MathUtils {
     return a.toArray.zip(b.toArray).map( x => math.pow(x._1 - x._2, 2) ).reduce(_+_)
   }
 
-  def meanAndVariance(a:br_linalg.Vector[Double]) : (Double,Double) = {
+  def meanAndVariance(a:br_linalg.Vector[Double]) : (Double, Double) = meanAndVariance(a.toArray)
+
+  def meanAndVariance(a:Array[Double]) : (Double,Double) = {
     var n :Double = 0.0
     var sum :Double = 0
     var sum_sqr :Double = 0

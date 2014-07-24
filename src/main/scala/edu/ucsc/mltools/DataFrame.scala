@@ -1,4 +1,4 @@
-package edu.ucsc.mltest
+package edu.ucsc.mltools
 
 import breeze.io.CSVReader
 import java.io.{FileWriter, File, FileReader}
@@ -8,6 +8,7 @@ import org.apache.spark.mllib.regression.LabeledPoint
 import org.apache.spark.rdd.RDD
 import org.apache.spark.SparkContext
 import org.apache.spark.SparkContext._
+//import edu.ucsc.mltools.MathUtils
 
 
 object DataFrame {
@@ -62,7 +63,8 @@ class DataFrame(val sc : SparkContext, val index : IndexedSeq[String], val rdd:R
 
   def labelJoin(df:DataFrame, column:String) : LabeledDataFrame = {
     val i = index.indexOf(column)
-    val out = rdd.join( df.rdd ).map( x => (x._1, LabeledPoint(x._2._1.toArray(i), x._2._2) ) )
+    val other_rdd = df.rdd
+    val out = rdd.join( other_rdd ).map( x => (x._1, LabeledPoint(x._2._1.toArray(i), x._2._2) ) )
     new LabeledDataFrame(sc, index, out)
   }
 
