@@ -84,7 +84,7 @@ object FullRegressionGrouped {
       fromFile(cmdline.symbolFile()).getLines().map( _.stripLineEnd ).toArray
     } else {
       obs_data.index.toArray
-    }.filter( x => pred_data.index.contains() )
+    }.filter( x => pred_data.index.contains(x) )
 
     name_array.sliding(cmdline.groupSize(), cmdline.groupSize()).foreach( name_set => {
       println("Training %s".format( name_set.mkString(",") ))
@@ -101,7 +101,9 @@ object FullRegressionGrouped {
       ).coalesce(cmdline.taskCount())
 
       //val models = GroupedSVMWithSGD.train[String](training, cmdline.traincycles())
-      val models = GroupedLogisticRegressionWithSGD.train[String](training, cmdline.traincycles())
+      val trainer = new GroupedLogisticRegressionWithSGD[String]().setIntercept(true)
+      trainer.optimizer.setNumIterations(cmdline.traincycles())
+      val models = trainer.run(training)
       models.foreach(x => {
         val w = new JSONObject(Map(obs_data.index.zip(x._2.weights.toArray): _*))
         val gene_name = x._1.split(":")(0)
