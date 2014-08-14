@@ -25,7 +25,7 @@ object ModelAnalysis {
       val taskCount: scallop.ScallopOption[Int] = opt[Int]("taskcount", default = Some(1000))
       val traincycles: scallop.ScallopOption[Int] = opt[Int]("traincycles", default = Some(100))
       val obsFile: scallop.ScallopOption[String] = trailArg[String](required = true)
-      val featureFile: scallop.ScallopOption[String] = trailArg[String](required = true)
+      val labelFile: scallop.ScallopOption[String] = trailArg[String](required = true)
     }
 
     var conf = new SparkConf()
@@ -43,7 +43,7 @@ object ModelAnalysis {
 
     val sc = new SparkContext(conf)
     val obs_data = DataFrame.load_csv(sc, cmdline.obsFile(), separator = '\t')
-    val pred_data = DataFrame.load_csv(sc, cmdline.featureFile(), separator = '\t')
+    val label_data = DataFrame.load_csv(sc, cmdline.labelFile(), separator = '\t')
 
     val index_br = obs_data.index_br
 
@@ -69,16 +69,23 @@ object ModelAnalysis {
     */
 
     val models = model_objects.map( x => {
-      val weight_map = x.get("weights").asInstanceOf[java.util.Map[String,Double]]
-      val weights = index_br.value.map( y => weight_map.get(y, 0.0) ).toArray
+      val weight_map = x.get("weights").asInstanceOf[java.util.Map[String,Double]].asScala
+      val weights = index_br.value.map( y => weight_map.getOrElse(y, 0.0) ).toArray
       val model = new LogisticRegressionModel(MLVectors.dense(weights), x.get("intercept").asInstanceOf[Double])
       model.clearThreshold()
-      (x.get("gene").asInstanceOf[String], model)
+      ("%s_%s".format(x.get("gene").asInstanceOf[String], x.get("foldNumber")), model)
     } ).filter(_._1 != null).collect()
 
-    models.foreach(println)
+    println(models.toIterator.next()._2.weights.toArray.mkString(","))
 
     /*
+    val predictions = models.cartesian( obs_data.rdd ).map( x => {
+      (x._1._1, Map( (x._2._1,x._1._2.predict(x._2._2)) ))
+    } ).reduceByKey( _ ++ _ )
+    val predictions_frame = DataFrame.create(predictions)
+    predictions_frame.write_csv("feature_matrix.tsv", seperator='\t')
+    */
+
     val models_br = sc.broadcast(models)
     val predictions = obs_data.rdd.map( x => {
       val m = models_br.value.map( y => {
@@ -87,8 +94,9 @@ object ModelAnalysis {
       (x._1, m)
     })
     val pred_matrix = DataFrame.create( predictions )
+
     pred_matrix.write_csv("feature_matrix.tsv", seperator='\t')
-    */
+
 
   }
 }

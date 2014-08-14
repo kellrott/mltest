@@ -12,9 +12,9 @@ import org.apache.spark.rdd.RDD
 import org.apache.spark.SparkContext._
 import org.apache.spark.{Partitioner, HashPartitioner, SparkContext, SparkConf}
 
-import org.apache.spark.mllib.grouped.GroupedSVMWithSGD
-import org.apache.spark.mllib.grouped.GroupedLogisticRegressionWithSGD
+import org.apache.spark.mllib.grouped.{GroupedBinaryClassificationMetrics, GroupedSVMWithSGD, GroupedLogisticRegressionWithSGD}
 import org.apache.spark.mllib.evaluation.BinaryClassificationMetrics
+import org.apache.spark.mllib.evaluation.binary.BinaryConfusionMatrix
 import org.apache.spark.mllib.regression.LabeledPoint
 import org.apache.spark.mllib.util.MLUtils
 import org.apache.spark.mllib.optimization.{L1Updater}
@@ -38,8 +38,10 @@ object FullRegressionGrouped {
       val master: scallop.ScallopOption[String] = opt[String]("master", default = Some("local"))
       val cores: scallop.ScallopOption[String] = opt[String]("cores")
       val workdir: scallop.ScallopOption[String] = opt[String]("workdir", default = Some("/tmp"))
-      val outdir: scallop.ScallopOption[String] = opt[String]("outdir", default = Some("weights"))
+      val outdir: scallop.ScallopOption[String] = opt[String]("outdir", default = Some("models"))
       val symbol: scallop.ScallopOption[String] = opt[String]("symbol")
+      val folds: scallop.ScallopOption[Int] = opt[Int]("folds", default = Some(0))
+      val regparam: scallop.ScallopOption[Double] = opt[Double]("regparam", default=Some(0.1))
       val symbolFile: scallop.ScallopOption[String] = opt[String]("symbolfile")
       val groupSize: scallop.ScallopOption[Int] = opt[Int]("groupsize", default = Some(10))
       val taskCount: scallop.ScallopOption[Int] = opt[Int]("taskcount", default = Some(1000))
@@ -85,69 +87,117 @@ object FullRegressionGrouped {
 
     name_array.sliding(cmdline.groupSize(), cmdline.groupSize()).foreach( name_set => {
       println("Training %s".format( name_set.mkString(",") ))
+
       val training_data = name_set.filter(x => pred_data.index.contains(x)).map(x => (x, pred_data.labelJoin(obs_data, x)))
+
       val folds = training_data.map(x => (x._1, MLUtils.kFold(x._2.rdd.map(_._2), 10, seed = 11)))
 
-      val groupSize = cmdline.groupSize()
+      val training: RDD[(String, LabeledPoint)] = if (cmdline.folds() > 0) {
+        val groupSize = cmdline.groupSize()
+        sc.union(
+          folds.flatMap(x => x._2.zipWithIndex.map(y => {
+            val name = "%s_%d".format(x._1, y._2)
+            y._1._1.map(z => (name, z))
+          }))
+        ).coalesce(cmdline.taskCount()).partitionBy(new HashPartitioner(groupSize * 10 * 2))
+      } else {
+        sc.union(
+          training_data.map( x => {
+            val name = x._1
+            x._2.rdd.map( y => (name, y._2) )
+          })
+        )
+      }
 
-      val training: RDD[(String, LabeledPoint)] = sc.union(
-        folds.flatMap(x => x._2.zipWithIndex.map(y => {
-          val name = "%s_%d".format(x._1, y._2)
-          y._1._1.map(z => (name, z))
-        }))
-      ).coalesce(cmdline.taskCount()).partitionBy( new HashPartitioner(groupSize * 10 * 2))
-
-      /*
-      println("Fold Count: %d".format(folds.size))
-      println("Training keys: %s".format( (training.keys.distinct().collect()).mkString(",")))
-      println("Training %s samples".format(training.count()))
-      */
+      val testing: RDD[(String,LabeledPoint)] = if (cmdline.folds() > 0) {
+        val groupSize = cmdline.groupSize()
+        sc.union(
+          folds.flatMap(x => x._2.zipWithIndex.map(y => {
+            val name = "%s_%d".format(x._1, y._2)
+            y._1._2.map(z => (name, z))
+          }))
+        ).coalesce(cmdline.taskCount()).partitionBy(new HashPartitioner(groupSize * 10 * 2))
+      } else {
+        sc.union(
+          training_data.map( x => {
+            val name = x._1
+            x._2.rdd.map( y => (name, y._2) )
+          })
+        )
+      }
 
       //val models = GroupedSVMWithSGD.train[String](training, cmdline.traincycles())
       val trainer = new GroupedLogisticRegressionWithSGD[String]().setIntercept(true)
       trainer.optimizer.setNumIterations(cmdline.traincycles())
       trainer.optimizer.setUpdater(new L1Updater)
-      trainer.optimizer.setRegParam(0.1)
+      trainer.optimizer.setRegParam(cmdline.regparam())
       val models = trainer.run(training)
+      models.foreach( x => {
+        x._2.clearThreshold()
+      })
       println("Models Complete: %d".format(models.size))
 
-      //test the model
-      val fold_map = folds.toMap
+
+      val models_br = sc.broadcast(models)
+      val scoreAndLabel = testing.mapPartitions( x => {
+        x.map( y => (y._1, (models_br.value(y._1).predict(y._2.features), y._2.label )) )
+      } )
+
+      val metrics = new GroupedBinaryClassificationMetrics(scoreAndLabel)
+
+
+      val confusions = metrics.confusions.aggregateByKey(Map[Double,BinaryConfusionMatrix]()) (
+        seqOp = (agg:Map[Double, BinaryConfusionMatrix], n:(Double,BinaryConfusionMatrix)) => {
+          agg.updated(n._1,n._2)
+        },
+        combOp = (a:Map[Double, BinaryConfusionMatrix], b:Map[Double, BinaryConfusionMatrix]) => {
+          a ++ b
+        }
+      ).collect().toMap
 
       models.foreach(x => {
-        println("Testing: %s".format(x._1))
-        val gene_name = x._1.split("_")(0)
-        val fold_num = x._1.split(("_"))(1).toInt
-        val model = sc.broadcast(x._2)
-        x._2.clearThreshold()
-        val testing = fold_map(gene_name)(fold_num)._2
-        // Evaluate model on training examples and compute training error
-        val scoreAndLabel = testing.map { y =>
-          val prediction = model.value.predict(y.features)
-          (prediction, y.label)
-        }
-        model.unpersist()
-        val metrics = new BinaryClassificationMetrics(scoreAndLabel)
-        val auROC = metrics.areaUnderROC()
-        val auPR = metrics.areaUnderPR()
-        val stats = new JSONObject(Map( ("auROC", auROC), ("auPR", auPR)))
-
         val w = new JSONObject(Map(obs_data.index.zip(x._2.weights.toArray): _*))
 
-        val obj = Map(
-          ("gene", gene_name),
-          ("foldNumber", fold_num),
-          ("weights", w),
-          ("method", "logistic"),
-          ("intercept", x._2.intercept),
-          ("stats", stats)
-        )
-        val outfile = new File(cmdline.outdir(), x._1 + ".weights.vec")
+        val stats = new JSONObject( confusions(x._1).map( x => {
+          (x._1.toString, new JSONObject( Map(
+            ("tp", x._2.numTruePositives),
+            ("fp", x._2.numFalsePositives),
+            ("tn", x._2.numTrueNegatives),
+            ("fn", x._2.numFalseNegatives)
+          ) ))
+        } ).toMap )
+
+        val obj = if (x._1.contains("_")) {
+          val gene_name = x._1.split("_")(0)
+          val fold_num = x._1.split(("_"))(1).toInt
+          Map(
+            ("gene", gene_name),
+            ("foldNumber", fold_num),
+            ("weights", w),
+            ("method", "logistic"),
+            ("regParam", cmdline.regparam()),
+            ("cycles", cmdline.traincycles()),
+            ("intercept", x._2.intercept),
+            ("stats", stats)
+          )
+        } else {
+          Map(
+            ("gene", x._1),
+            ("weights", w),
+            ("method", "logistic"),
+            ("regParam", cmdline.regparam()),
+            ("cycles", cmdline.traincycles()),
+            ("intercept", x._2.intercept),
+            ("stats", stats)
+          )
+        }
+        val outfile = new File(cmdline.outdir(), x._1 + ".model")
         println("Outputting %s".format(outfile))
         val f = new java.io.FileWriter(outfile)
         f.write(new JSONObject(obj).toString())
         f.close()
       })
+
     })
     sc.stop()
   }

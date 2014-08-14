@@ -68,6 +68,22 @@ class DataFrame(val sc : SparkContext, val index : IndexedSeq[String], val rdd:R
     new LabeledDataFrame(sc, index, out)
   }
 
+  def reindex(newIndex : IndexedSeq[String], default:Double=0.0) : DataFrame = {
+    val remap = newIndex.map( x => index.indexOf(x) )
+    val remap_br = sc.broadcast(remap)
+    val new_rdd = rdd.map( x => {
+      val a = x._2.toArray
+      val new_a = remap.map( y => {
+        if (y == -1)
+          default
+        else
+          a(y)
+      }).toArray
+      (x._1, ml_linalg.Vectors.dense(new_a))
+    })
+    new DataFrame(sc, newIndex, new_rdd)
+  }
+
   def apply(f: Double => Double) : DataFrame = {
     return new DataFrame(sc, index, rdd.map( x => (x._1, ml_linalg.Vectors.dense(x._2.toArray.map(f))) ) )
   }
