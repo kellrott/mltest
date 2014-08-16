@@ -65,8 +65,19 @@ class DataFrame(val sc : SparkContext, val index : IndexedSeq[String], val rdd:R
     val i = index.indexOf(column)
     val other_rdd = df.rdd
     val out = rdd.join( other_rdd ).map( x => (x._1, LabeledPoint(x._2._1.toArray(i), x._2._2) ) )
+    new LabeledDataFrame(sc, column, index, out)
+  }
+
+  /*
+  def labelJoin(df:DataFrame, columns:Array[String]) : LabeledDataFrame = {
+    val i = columns.map( x => index.indexOf(x) )
+    val other_rdd = df.rdd
+    val out = rdd.join( other_rdd ).flatMap( x => {
+      i.map( y => (x._1, LabeledPoint(x._2._1.toArray(y), x._2._2) ) )
+    } )
     new LabeledDataFrame(sc, index, out)
   }
+  */
 
   def reindex(newIndex : IndexedSeq[String], default:Double=0.0) : DataFrame = {
     val remap = newIndex.map( x => index.indexOf(x) )

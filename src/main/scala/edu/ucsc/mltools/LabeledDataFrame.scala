@@ -5,7 +5,7 @@ import org.apache.spark.rdd.RDD
 import org.apache.spark.SparkContext
 
 
-class LabeledDataFrame(val sc:SparkContext, val index : IndexedSeq[String], val rdd:RDD[(String,LabeledPoint)]) {
+class LabeledDataFrame(val sc:SparkContext, val labelName:String, val index : IndexedSeq[String], val rdd:RDD[(String,LabeledPoint)]) {
 
 }
 

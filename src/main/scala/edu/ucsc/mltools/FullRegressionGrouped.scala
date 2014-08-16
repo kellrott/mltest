@@ -57,6 +57,7 @@ object FullRegressionGrouped {
       .set("spark.local.dir", cmdline.workdir())
       .set("spark.akka.frameSize", "50")
       .set("spark.akka.threads", "10")
+      .set("spark.akka.timeout", "600")
 
     if (cmdline.cores.isDefined) {
       conf = conf.set("spark.mesos.coarse", "true")
@@ -146,24 +147,27 @@ object FullRegressionGrouped {
       val metrics = new GroupedBinaryClassificationMetrics(scoreAndLabel)
 
 
-      val confusions = metrics.confusions.aggregateByKey(Map[Double,BinaryConfusionMatrix]()) (
+      val outdir = new File(cmdline.outdir()).getAbsolutePath
+      val regparam = cmdline.regparam()
+      val traincycles = cmdline.traincycles()
+      val obs_data_index = obs_data.index
+      metrics.confusions.aggregateByKey(Map[Double,BinaryConfusionMatrix]()) (
         seqOp = (agg:Map[Double, BinaryConfusionMatrix], n:(Double,BinaryConfusionMatrix)) => {
-          agg.updated(n._1,n._2)
+          agg.updated(n._1, n._2)
         },
         combOp = (a:Map[Double, BinaryConfusionMatrix], b:Map[Double, BinaryConfusionMatrix]) => {
           a ++ b
         }
-      ).collect().toMap
+      ).foreach( x=> {
+        val model = models_br.value(x._1)
+        val w = new JSONObject(Map(obs_data_index.zip(model.weights.toArray): _*))
 
-      models.foreach(x => {
-        val w = new JSONObject(Map(obs_data.index.zip(x._2.weights.toArray): _*))
-
-        val stats = new JSONObject( confusions(x._1).map( x => {
-          (x._1.toString, new JSONObject( Map(
-            ("tp", x._2.numTruePositives),
-            ("fp", x._2.numFalsePositives),
-            ("tn", x._2.numTrueNegatives),
-            ("fn", x._2.numFalseNegatives)
+        val stats = new JSONObject( x._2.map( y => {
+          (y._1.toString, new JSONObject( Map(
+            ("tp", y._2.numTruePositives),
+            ("fp", y._2.numFalsePositives),
+            ("tn", y._2.numTrueNegatives),
+            ("fn", y._2.numFalseNegatives)
           ) ))
         } ).toMap )
 
@@ -175,9 +179,9 @@ object FullRegressionGrouped {
             ("foldNumber", fold_num),
             ("weights", w),
             ("method", "logistic"),
-            ("regParam", cmdline.regparam()),
-            ("cycles", cmdline.traincycles()),
-            ("intercept", x._2.intercept),
+            ("regParam", regparam),
+            ("cycles", traincycles),
+            ("intercept", model.intercept),
             ("stats", stats)
           )
         } else {
@@ -185,13 +189,13 @@ object FullRegressionGrouped {
             ("gene", x._1),
             ("weights", w),
             ("method", "logistic"),
-            ("regParam", cmdline.regparam()),
-            ("cycles", cmdline.traincycles()),
-            ("intercept", x._2.intercept),
+            ("regParam", regparam),
+            ("cycles", traincycles),
+            ("intercept", model.intercept),
             ("stats", stats)
           )
         }
-        val outfile = new File(cmdline.outdir(), x._1 + ".model")
+        val outfile = new File(outdir, x._1 + ".model")
         println("Outputting %s".format(outfile))
         val f = new java.io.FileWriter(outfile)
         f.write(new JSONObject(obj).toString())
