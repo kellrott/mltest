@@ -84,15 +84,13 @@ object FullRegressionGrouped {
       fromFile(cmdline.symbolFile()).getLines().map( _.stripLineEnd ).toArray
     } else {
       obs_data.index.toArray
-    }.filter( x => pred_data.index.contains(x) )
+    }.filter( x => pred_data.index.contains(x) ).filter( x => obs_data.index.contains(x) )
 
     name_array.sliding(cmdline.groupSize(), cmdline.groupSize()).foreach( name_set => {
       println("Training %s".format( name_set.mkString(",") ))
 
       val training_data = name_set.filter(x => pred_data.index.contains(x)).map(x => (x, pred_data.labelJoin(obs_data, x)))
-
       val folds = training_data.map(x => (x._1, MLUtils.kFold(x._2.rdd.map(_._2), 10, seed = 11)))
-
       val training: RDD[(String, LabeledPoint)] = if (cmdline.folds() > 0) {
         val groupSize = cmdline.groupSize()
         sc.union(
@@ -110,6 +108,9 @@ object FullRegressionGrouped {
         )
       }
 
+
+      //val training_data = pred_data.labelJoin(obs_data, name_set.filter(x => pred_data.index.contains(x)) )
+      //val folds = MLUtils.kFold(training_data.rdd, 10, seed=11)
       val testing: RDD[(String,LabeledPoint)] = if (cmdline.folds() > 0) {
         val groupSize = cmdline.groupSize()
         sc.union(
@@ -126,7 +127,7 @@ object FullRegressionGrouped {
           })
         )
       }
-
+      
       //val models = GroupedSVMWithSGD.train[String](training, cmdline.traincycles())
       val trainer = new GroupedLogisticRegressionWithSGD[String]().setIntercept(true)
       trainer.optimizer.setNumIterations(cmdline.traincycles())
