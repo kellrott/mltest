@@ -84,9 +84,10 @@ object FullRegressionGrouped {
       fromFile(cmdline.symbolFile()).getLines().map( _.stripLineEnd ).toArray
     } else {
       obs_data.index.toArray
-    }.filter( x => pred_data.index.contains(x) ).filter( x => obs_data.index.contains(x) )
-
-    name_array.sliding(cmdline.groupSize(), cmdline.groupSize()).foreach( name_set => {
+    }
+    
+    name_array.filter( x => pred_data.index.contains(x) ).filter( x => obs_data.index.contains(x) )
+      .sliding(cmdline.groupSize(), cmdline.groupSize()).foreach( name_set => {
       println("Training %s".format( name_set.mkString(",") ))
 
       val training_data = name_set.filter(x => pred_data.index.contains(x)).map(x => (x, pred_data.labelJoin(obs_data, x)))
