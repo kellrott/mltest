@@ -13,12 +13,12 @@ import org.apache.spark.SparkContext._
 
 object DataFrame {
 
-  def load_csv(sc: SparkContext, path: String, separator : Char =  ',') : DataFrame = {
+  def load_csv(sc: SparkContext, path: String, separator : Char =  ',', minPartitions : Int=2) : DataFrame = {
     val obs_data = CSVReader.iterator(new FileReader(new File(path)), separator = separator)
     val header = obs_data.next().seq
 
     val header_br = sc.broadcast(header)
-    val obs_rdd = sc.textFile(path).flatMap( x => CSVReader.parse(x, separator = separator) )
+    val obs_rdd = sc.textFile(path, minPartitions).flatMap( x => CSVReader.parse(x, separator = separator) )
     val obs_rdd_values = obs_rdd.filter( x=> x.zip(header_br.value).filter( y => y._1==y._2 ).size < header_br.value.size ).
       map( x =>
       (x(0), ml_linalg.Vectors.dense(x.slice(1, x.size).map(y =>y match { case "" => 0.0; case _ => y.toDouble }).toArray))
@@ -49,7 +49,6 @@ class DataFrame(val sc : SparkContext, val index : IndexedSeq[String], val rdd:R
     val rdd_values = rdd.
       flatMap( x=> x._2.toArray.zip(index_br.value).map( y => (x._1, Map((y._2, y._1.toDouble))) ) ).
       reduceByKey( (x,y) => x ++ y)
-
   }
   */
 
@@ -131,6 +130,10 @@ class DataFrame(val sc : SparkContext, val index : IndexedSeq[String], val rdd:R
       out.write(x._2.toArray.mkString(seperator.toString))
       out.write("\n")
     })
+  }
+
+  def coalesce(numPartitions:Int = 1) : DataFrame = {
+    return new DataFrame(sc, index, rdd.coalesce(numPartitions))
   }
 
 }

@@ -19,6 +19,20 @@ import org.apache.spark.mllib.regression.LabeledPoint
 import org.apache.spark.mllib.util.MLUtils
 import org.apache.spark.mllib.optimization.{L1Updater}
 
+import com.esotericsoftware.kryo.Kryo
+import org.apache.spark.serializer.KryoRegistrator
+import org.apache.spark.mllib.classification.LogisticRegressionModel
+
+
+class MLRegistrator extends KryoRegistrator {
+  override def registerClasses(kryo: Kryo) {
+    kryo.register(classOf[DataFrame])
+    kryo.register(classOf[LabeledDataFrame])
+    kryo.register(classOf[LabeledPoint])
+    kryo.register(classOf[LogisticRegressionModel])
+  }
+}
+
 /*
 class NamePartitioner(groupMap:Map[String,Int]) extends Partitioner {
   override def numPartitions: Int = groupMap.size
@@ -58,19 +72,25 @@ object FullRegressionGrouped {
       .set("spark.akka.frameSize", "50")
       .set("spark.akka.threads", "10")
       .set("spark.akka.timeout", "600")
+      .set("spark.akka.askTimeout", "60")
+      .set("spark.storage.blockManagerSlaveTimeoutMs", "1000000")
 
     if (cmdline.cores.isDefined) {
       conf = conf.set("spark.mesos.coarse", "true")
         .set("spark.cores.max", cmdline.cores())
     }
 
+    conf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
+    conf.set("spark.kryo.registrator", "edu.ucsc.mltools.MLRegistrator")
+
+
     //.set("spark.eventLog.enabled", "true")
     //.set("spark.scheduler.mode", "FAIR")
 
 
     val sc = new SparkContext(conf)
-    val obs_data = DataFrame.load_csv(sc, cmdline.obsFile(), separator = '\t')
-    val pred_data = DataFrame.load_csv(sc, cmdline.featureFile(), separator = '\t')
+    val obs_data = DataFrame.load_csv(sc, cmdline.obsFile(), separator = '\t', minPartitions=100)
+    val pred_data = DataFrame.load_csv(sc, cmdline.featureFile(), separator = '\t', minPartitions=100)
 
     obs_data.rdd.cache()
     pred_data.rdd.cache()
@@ -90,7 +110,7 @@ object FullRegressionGrouped {
       .sliding(cmdline.groupSize(), cmdline.groupSize()).foreach( name_set => {
       println("Training %s".format( name_set.mkString(",") ))
 
-      val training_data = name_set.filter(x => pred_data.index.contains(x)).map(x => (x, pred_data.labelJoin(obs_data, x)))
+      val training_data = name_set.filter(x => pred_data.index.contains(x)).map(x => (x, pred_data.labelJoin(obs_data, x).coalesce(1)))
       val folds = training_data.map(x => (x._1, MLUtils.kFold(x._2.rdd.map(_._2), 10, seed = 11)))
       val training: RDD[(String, LabeledPoint)] = if (cmdline.folds() > 0) {
         val groupSize = cmdline.groupSize()
@@ -99,7 +119,7 @@ object FullRegressionGrouped {
             val name = "%s_%d".format(x._1, y._2)
             y._1._1.map(z => (name, z))
           }))
-        ).coalesce(cmdline.taskCount()).partitionBy(new HashPartitioner(groupSize * 10 * 2))
+        )//.coalesce(cmdline.taskCount()).partitionBy(new HashPartitioner(groupSize * 10 * 2))
       } else {
         sc.union(
           training_data.map( x => {
@@ -119,7 +139,7 @@ object FullRegressionGrouped {
             val name = "%s_%d".format(x._1, y._2)
             y._1._2.map(z => (name, z))
           }))
-        ).coalesce(cmdline.taskCount()).partitionBy(new HashPartitioner(groupSize * 10 * 2))
+        )//.coalesce(cmdline.taskCount()).partitionBy(new HashPartitioner(groupSize * 10 * 2))
       } else {
         sc.union(
           training_data.map( x => {

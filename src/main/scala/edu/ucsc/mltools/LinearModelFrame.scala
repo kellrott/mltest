@@ -7,8 +7,7 @@ import org.apache.spark.mllib.{linalg => ml_linalg}
 import org.apache.spark.mllib.regression.GeneralizedLinearModel
 import org.apache.spark.mllib.linalg.Vector
 import breeze.{linalg => br_linalg}
-
-
+import org.apache.spark.mllib.classification.LogisticRegressionModel
 
 
 object LinearModelFrame {
@@ -16,7 +15,7 @@ object LinearModelFrame {
     val s = data.map( x => x._3.keySet ).reduce( _ ++ _).toIndexedSeq
     val index_br = data.context.broadcast(s)
     val vec_data = data.map( x => {
-      val model = new MyLogisticRegressionModel(ml_linalg.Vectors.dense(index_br.value.map( y => x._3(y)).toArray), x._2)
+      val model = new LogisticRegressionModel(ml_linalg.Vectors.dense(index_br.value.map( y => x._3(y)).toArray), x._2)
       (x._1, model.asInstanceOf[GeneralizedLinearModel])
     })
     return new LinearModelFrame(data.context, s, vec_data)
